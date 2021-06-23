@@ -47,7 +47,9 @@ spec:
           subPath: nats-cfg.conf
         args:
           - --store
-          - memory
+          - file
+          - --dir
+          - /home
           - --cluster_id
           - faas-cluster
           {{- if or .Values.nats.enableMonitoring .Values.nats.metrics.enabled }}
