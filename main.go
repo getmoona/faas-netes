@@ -11,6 +11,7 @@ import (
 
 	clientset "github.com/openfaas/faas-netes/pkg/client/clientset/versioned"
 	informers "github.com/openfaas/faas-netes/pkg/client/informers/externalversions"
+	v1 "github.com/openfaas/faas-netes/pkg/client/informers/externalversions/openfaas/v1"
 	"github.com/openfaas/faas-netes/pkg/config"
 	"github.com/openfaas/faas-netes/pkg/controller"
 	"github.com/openfaas/faas-netes/pkg/handlers"
@@ -22,8 +23,12 @@ import (
 	"github.com/openfaas/faas-provider/logs"
 	"github.com/openfaas/faas-provider/proxy"
 	providertypes "github.com/openfaas/faas-provider/types"
+
 	kubeinformers "k8s.io/client-go/informers"
+	v1apps "k8s.io/client-go/informers/apps/v1"
+	v1core "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	glog "k8s.io/klog"
 
@@ -60,6 +65,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error building kubeconfig: %s", err.Error())
 	}
+
+	kubeconfigQPS := 100
+	kubeconfigBurst := 250
+
+	clientCmdConfig.QPS = float32(kubeconfigQPS)
+	clientCmdConfig.Burst = kubeconfigBurst
 
 	kubeClient, err := kubernetes.NewForConfig(clientCmdConfig)
 	if err != nil {
@@ -117,6 +128,7 @@ func main() {
 	// this is where we need to swap to the faasInformerFactory
 	profileInformerOpt := informers.WithNamespace(config.ProfilesNamespace)
 	profileInformerFactory := informers.NewSharedInformerFactoryWithOptions(faasClient, defaultResync, profileInformerOpt)
+
 	profileLister := profileInformerFactory.Openfaas().V1().Profiles().Lister()
 	factory := k8s.NewFunctionFactory(kubeClient, deployConfig, profileLister)
 
@@ -130,51 +142,85 @@ func main() {
 		faasClient:             faasClient,
 	}
 
-	if !operator {
-		log.Println("Starting controller")
-		runController(setup)
-	} else {
+	if operator {
 		log.Println("Starting operator")
 		runOperator(setup, config)
+	} else {
+		log.Println("Starting controller")
+		runController(setup)
+	}
+}
+
+type customInformers struct {
+	EndpointsInformer  v1core.EndpointsInformer
+	DeploymentInformer v1apps.DeploymentInformer
+	FunctionsInformer  v1.FunctionInformer
+}
+
+func startInformers(setup serverSetup, stopCh <-chan struct{}, operator bool) customInformers {
+	kubeInformerFactory := setup.kubeInformerFactory
+	faasInformerFactory := setup.faasInformerFactory
+
+	var functions v1.FunctionInformer
+	if operator {
+		// go faasInformerFactory.Start(stopCh)
+
+		functions = faasInformerFactory.Openfaas().V1().Functions()
+		go functions.Informer().Run(stopCh)
+		if ok := cache.WaitForNamedCacheSync("faas-netes:functions", stopCh, functions.Informer().HasSynced); !ok {
+			log.Fatalf("failed to wait for cache to sync")
+		}
+	}
+
+	// go kubeInformerFactory.Start(stopCh)
+
+	deployments := kubeInformerFactory.Apps().V1().Deployments()
+	go deployments.Informer().Run(stopCh)
+	if ok := cache.WaitForNamedCacheSync("faas-netes:deployments", stopCh, deployments.Informer().HasSynced); !ok {
+		log.Fatalf("failed to wait for cache to sync")
+	}
+
+	endpoints := kubeInformerFactory.Core().V1().Endpoints()
+	go endpoints.Informer().Run(stopCh)
+	if ok := cache.WaitForNamedCacheSync("faas-netes:endpoints", stopCh, endpoints.Informer().HasSynced); !ok {
+		log.Fatalf("failed to wait for cache to sync")
+	}
+
+	// go setup.profileInformerFactory.Start(stopCh)
+
+	profileInformerFactory := setup.profileInformerFactory
+	profiles := profileInformerFactory.Openfaas().V1().Profiles()
+	go profiles.Informer().Run(stopCh)
+	if ok := cache.WaitForNamedCacheSync("faas-netes:profiles", stopCh, profiles.Informer().HasSynced); !ok {
+		log.Fatalf("failed to wait for cache to sync")
+	}
+
+	return customInformers{
+		EndpointsInformer:  endpoints,
+		DeploymentInformer: deployments,
+		FunctionsInformer:  functions,
 	}
 }
 
 // runController runs the faas-netes imperative controller
 func runController(setup serverSetup) {
-	// pull out the required config and clients fromthe setup, this is largely a
-	// leftover from refactoring the setup to a shared step and keeping the function
-	// signature readable
 	config := setup.config
 	kubeClient := setup.kubeClient
 	factory := setup.functionFactory
-	kubeInformerFactory := setup.kubeInformerFactory
-	faasInformerFactory := setup.faasInformerFactory
 
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := signals.SetupSignalHandler()
+	operator := false
+	listers := startInformers(setup, stopCh, operator)
 
-	endpointsInformer := kubeInformerFactory.Core().V1().Endpoints()
-
-	deploymentLister := kubeInformerFactory.Apps().V1().
-		Deployments().Lister()
-
-	log.Println("Waiting for openfaas CRD cache sync")
-	faasInformerFactory.WaitForCacheSync(stopCh)
-	setup.profileInformerFactory.WaitForCacheSync(stopCh)
-	log.Println("Cache sync complete")
-	go faasInformerFactory.Start(stopCh)
-	go kubeInformerFactory.Start(stopCh)
-	go setup.profileInformerFactory.Start(stopCh)
-
-	lister := endpointsInformer.Lister()
-	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, lister)
+	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, listers.EndpointsInformer.Lister())
 
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		FunctionProxy:        proxy.NewHandlerFunc(config.FaaSConfig, functionLookup),
 		DeleteHandler:        handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
 		DeployHandler:        handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory),
-		FunctionReader:       handlers.MakeFunctionReader(config.DefaultFunctionNamespace, deploymentLister),
-		ReplicaReader:        handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deploymentLister),
+		FunctionReader:       handlers.MakeFunctionReader(config.DefaultFunctionNamespace, listers.DeploymentInformer.Lister()),
+		ReplicaReader:        handlers.MakeReplicaReader(config.DefaultFunctionNamespace, listers.DeploymentInformer.Lister()),
 		ReplicaUpdater:       handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
 		UpdateHandler:        handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
 		HealthHandler:        handlers.MakeHealthHandler(),
@@ -189,9 +235,6 @@ func runController(setup serverSetup) {
 
 // runOperator runs the CRD Operator
 func runOperator(setup serverSetup, cfg config.BootstrapConfig) {
-	// pull out the required config and clients fromthe setup, this is largely a
-	// leftover from refactoring the setup to a shared step and keeping the function
-	// signature readable
 	kubeClient := setup.kubeClient
 	faasClient := setup.faasClient
 	kubeInformerFactory := setup.kubeInformerFactory
@@ -205,13 +248,10 @@ func runOperator(setup serverSetup, cfg config.BootstrapConfig) {
 	setupLogging()
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := signals.SetupSignalHandler()
-	endpointsInformer := kubeInformerFactory.Core().V1().Endpoints()
-	deploymentInformer := kubeInformerFactory.Apps().V1().Deployments()
+	// set up signals so we handle the first shutdown signal gracefully
 
-	glog.Infof("Waiting for cache sync in main")
-	kubeInformerFactory.WaitForCacheSync(stopCh)
-	setup.profileInformerFactory.WaitForCacheSync(stopCh)
-	glog.Infof("Cache sync done")
+	operator := true
+	listers := startInformers(setup, stopCh, operator)
 
 	ctrl := controller.NewController(
 		kubeClient,
@@ -221,11 +261,7 @@ func runOperator(setup serverSetup, cfg config.BootstrapConfig) {
 		factory,
 	)
 
-	srv := server.New(faasClient, kubeClient, endpointsInformer, deploymentInformer, cfg.ClusterRole)
-
-	go faasInformerFactory.Start(stopCh)
-	go kubeInformerFactory.Start(stopCh)
-	go setup.profileInformerFactory.Start(stopCh)
+	srv := server.New(faasClient, kubeClient, listers.EndpointsInformer, listers.DeploymentInformer.Lister(), cfg.ClusterRole, cfg)
 
 	go srv.Start()
 	if err := ctrl.Run(1, stopCh); err != nil {

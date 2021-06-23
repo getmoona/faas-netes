@@ -40,7 +40,7 @@ If you wish to continue without using arkade, read on for instructions.
 
 These instructions are for Intel (normal computers), jump to the end of the document for ARM and Raspberry Pi.
 
-To use the chart, you will need Helm, we recommend helm 3:
+To use the chart, you will need to use Helm 3:
 
 Get it from arkade:
 
@@ -76,9 +76,9 @@ Now decide how you want to expose the services and edit the `helm upgrade` comma
 
 > Note: even without a LoadBalancer or IngressController you can access your gateway at any time via `kubectl port-forward`.
 
-### Deploy
+## Deploy OpenFaaS Community components
 
-Note that the commands will differ slightly between versions, if not specified, the instructions are for helm 2.
+> OpenFaaS PRO customers should read on to the next section.
 
 Now deploy OpenFaaS from the helm chart repo:
 
@@ -99,6 +99,35 @@ PASSWORD=$(kubectl -n openfaas get secret basic-auth -o jsonpath="{.data.basic-a
 echo "OpenFaaS admin password: $PASSWORD"
 ```
 
+## Deploy as an OpenFaaS PRO customer
+
+* Create the required secret with your [OpenFaaS PRO license code](https://www.openfaas.com/support/):
+
+```bash
+kubectl create secret generic \
+    -n openfaas \
+    openfaas-license \
+    --from-file license=$HOME/OPENFAAS_LICENSE
+```
+
+Now deploy OpenFaaS from the helm chart repo:
+
+```sh
+helm repo update \
+ && helm upgrade openfaas --install openfaas/openfaas \
+    --namespace openfaas  \
+    --set functionNamespace=openfaas-fn \
+    --set generateBasicAuth=true \
+    --set openfaasPRO=true
+```
+
+The main change here is to add: `--set openfaasPRO=true`
+
+See also:
+* Scale-down to zero (in this document)
+* [OpenFaaS PRO SSO/OIDC](https://docs.openfaas.com/openfaas-pro/sso/)
+* [OpenFaaS PRO Kafka Event Connector](https://docs.openfaas.com/openfaas-pro/kafka-events/)
+
 #### Generate basic-auth credentials
 
 The chart has a pre-install hook which can generate basic-auth credentials, enable it with `--set generateBasicAuth=true`.
@@ -115,9 +144,9 @@ kubectl -n openfaas create secret generic basic-auth \
 echo "OpenFaaS admin password: $PASSWORD"
 ```
 
-#### Tuning cold-start
+#### Tuning function cold-starts
 
-The concept of a cold-start in OpenFaaS only applies if you A) use faas-idler and B) set a specific function to scale to zero. Otherwise there is not a cold-start, because at least one replica of your function remains available.
+The concept of a cold-start in OpenFaaS only applies if you A) use faas-idler and B) set a specific function to [scale to zero](https://docs.openfaas.com/openfaas-pro/scale-to-zero/). Otherwise there is not a cold-start, because at least one replica of your function remains available.
 
 There are two ways to reduce the Kubernetes cold-start for a pre-pulled image, which is around 1-2 seconds.
 
@@ -142,7 +171,6 @@ faasnetes:
 # redacted
   imagePullPolicy: "IfNotPresent"    # Image pull policy for deployed functions
 ```
-
 
 In addition:
 
@@ -211,23 +239,12 @@ This option is good for those that have issues with or concerns about installing
 
 2. Render the chart to a Kubernetes manifest called `openfaas.yaml`
 
-    Helm 3:
     ```sh
     helm template \
       openfaas chart/openfaas/ \
       --namespace openfaas \
       --set basic_auth=true \
       --set functionNamespace=openfaas-fn > openfaas.yaml
-    ```
-
-    Helm 2:
-
-    ```sh
-    helm template chart/openfaas \
-        --name openfaas \
-        --namespace openfaas  \
-        --set basic_auth=true \
-        --set functionNamespace=openfaas-fn > openfaas.yaml
     ```
 
     You can set the values and overrides just as you would in the install/upgrade commands above.
@@ -246,10 +263,13 @@ You can run the following command from within the `faas-netes/chart` folder in t
 
 ```sh
 helm upgrade openfaas --install chart/openfaas \
-    --namespace openfaas  \
+    --namespace openfaas \
     --set basic_auth=true \
-    --set functionNamespace=openfaas-fn
+    --set functionNamespace=openfaas-fn \
+    --set generateBasicAuth=true
 ```
+
+You can override specific images by adding `--set gateway.image=` for instance.
 
 ## Exposing services
 
@@ -338,32 +358,24 @@ Scaling up from zero replicas is enabled by default, to turn it off set `scaleFr
 
 ### Scale-down to zero (off by default)
 
-Scaling down to zero replicas can be achieved either through the REST API and your own controller, or by using the [faas-idler](https://github.com/openfaas-incubator/faas-idler) component.
+Scaling down to zero replicas can be achieved either through the REST API and your own controller, or by using the faas-idler component. This is an OpenFaaS PRO feature and an effective way to save costs on your infrastructure costs.
 
-By default the faas-idler is set to only do a dryRun and to not scale any functions down.
+OpenFaaS PRO will only scale down functions which have marked themselves as eligible for this behaviour through the use of a label: `com.openfaas.scale.zero=true`.
 
-```sh
---set faasIdler.dryRun=true/false
+See also: [Scale to Zero docs](https://docs.openfaas.com/openfaas-pro/scale-to-zero/).
+
+Check the logs with:
+
+```bash
+kubectl logs -n openfaas deploy/faas-idler
 ```
-
-The faas-idler will only scale down functions which have marked themselves as eligible for this behaviour through the use of a label: `com.openfaas.scale.zero=true`.
-
-See also: [faas-idler README](https://docs.openfaas.com/architecture/autoscaling/#zero-scale).
 
 ## Removing the OpenFaaS
 
 All control plane components can be cleaned up with helm:
 
-Helm 3:
-
 ```sh
 helm delete openfaas --namespace openfaas
-```
-
-Helm 2:
-
-```sh
-helm delete --purge openfaas
 ```
 
 Follow this by the following to remove all other associated objects:
@@ -374,18 +386,14 @@ kubectl delete namespace openfaas openfaas-fn
 
 In some cases your additional functions may need to be either deleted before deleting the chart with `faas-cli` or manually deleted using `kubectl delete`.
 
-## ARM
+## ARM and Raspberry Pi
 
-If you would like to deploy OpenFaaS to ARM i.e. Raspberry Pi, ARM64 machines provided by Packet.net, Scaleway or to AWS Graviton, then you should use the appropriate values.yaml file.
-
-* `values-armhf.yml` - for Raspberry Pi and other ARMv7 boards (run `uname -a` to find out which you have)
-* `values-arm64.yml` - for everything else (`arm64` or `aarch64`)
-
-It is recommended that you install OpenFaaS to ARM machines [using k3sup](https://k3sup.dev/) instead of helm directly since it will determine the correct values to be used.
+OpenFaaS container images are currently published as multi-arch for ARM64, armhf and `x64_64`. It's recommended that you use [arkade](https://get-arkade.dev) to install, or use the appropriate values.yaml file.
 
 See also: [Kubernetes and Raspberry Pi in the docs](https://docs.openfaas.com/deployment/kubernetes)
 
 ## Kubernetes versioning
+
 This Helm chart currently supports version 1.16+
 
 Note that OpenFaaS itself may support a wider range of versions, [see here](../../README.md#kubernetes-versions)
@@ -425,7 +433,7 @@ Additional OpenFaaS options in `values.yaml`.
 | `faasnetes.writeTimeout` | Queue worker write timeout | `60s` |
 | `faasnetes.imagePullPolicy` | Image pull policy for deployed functions | `Always` |
 | `faasnetes.setNonRootUser` | Force all function containers to run with user id `12000` | `false` |
-| `gateway.directFunctions` | Invoke functions directly without using the provider | `true` |
+| `gateway.directFunctions` | Invoke functions directly using `Service` without delegating to the provider | `false` |
 | `gateway.replicas` | Replicas of the gateway, pick more than `1` for HA | `1` |
 | `gateway.readTimeout` | Queue worker read timeout | `65s` |
 | `gateway.writeTimeout` | Queue worker write timeout | `65s` |

@@ -15,7 +15,7 @@ spec:
   template:
     metadata:
       annotations:
-        prometheus.io.scrape: "false"
+        prometheus.io/scrape: "false"
       labels:
         app: queue-worker
     spec:
@@ -29,7 +29,7 @@ spec:
             requests:
               cpu: 50m
               memory: 120Mi
-        image: openfaas/queue-worker:0.11.2
+        image: ghcr.io/openfaas/queue-worker:0.11.6
         imagePullPolicy: Always
         env:
         - name: faas_nats_address
@@ -56,5 +56,3 @@ spec:
         - name: auth
           readOnly: true
           mountPath: "/var/secrets"
-      nodeSelector:
-        beta.kubernetes.io/arch: amd64

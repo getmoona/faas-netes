@@ -31,6 +31,18 @@ func AsFunctionStatus(item appsv1.Deployment) *types.FunctionStatus {
 		Labels:            &labels,
 		Annotations:       &item.Spec.Template.Annotations,
 		Namespace:         item.Namespace,
+		Secrets:           ReadFunctionSecretsSpec(item),
+		CreatedAt:         item.CreationTimestamp.Time,
+	}
+
+	req := &types.FunctionResources{Memory: functionContainer.Resources.Requests.Memory().String(), CPU: functionContainer.Resources.Requests.Cpu().String()}
+	lim := &types.FunctionResources{Memory: functionContainer.Resources.Limits.Memory().String(), CPU: functionContainer.Resources.Limits.Cpu().String()}
+
+	if req.CPU != "0" || req.Memory != "0" {
+		function.Requests = req
+	}
+	if lim.CPU != "0" || lim.Memory != "0" {
+		function.Limits = lim
 	}
 
 	for _, v := range functionContainer.Env {

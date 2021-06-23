@@ -35,8 +35,6 @@ func makeListHandler(defaultNamespace string,
 			return
 		}
 
-		functions := []types.FunctionStatus{}
-
 		opts := metav1.ListOptions{}
 		res, err := client.OpenfaasV1().Functions(lookupNamespace).List(r.Context(), opts)
 		if err != nil {
@@ -46,22 +44,15 @@ func makeListHandler(defaultNamespace string,
 			return
 		}
 
+		functions := []types.FunctionStatus{}
 		for _, item := range res.Items {
-
 			desiredReplicas, availableReplicas, err := getReplicas(item.Spec.Name, lookupNamespace, deploymentLister)
 			if err != nil {
 				glog.Warningf("Function listing getReplicas error: %v", err)
 			}
-
-			function := types.FunctionStatus{
-				Name:              item.Spec.Name,
-				Replicas:          desiredReplicas,
-				AvailableReplicas: availableReplicas,
-				Image:             item.Spec.Image,
-				Labels:            item.Spec.Labels,
-				Annotations:       item.Spec.Annotations,
-				Namespace:         lookupNamespace,
-			}
+			function := toFunctionStatus(item)
+			function.AvailableReplicas = availableReplicas
+			function.Replicas = desiredReplicas
 
 			functions = append(functions, function)
 		}

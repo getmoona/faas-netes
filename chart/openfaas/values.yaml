@@ -1,12 +1,20 @@
 functionNamespace: openfaas-fn  # Default namespace for functions
 
-async: true
+# See https://www.openfaas.com/support for more
+openfaasPRO: false
 
 exposeServices: true
+
+async: true
+
 serviceType: NodePort
+
 httpProbe: true               # Setting to true will use HTTP for readiness and liveness probe on the OpenFaaS system Pods (incompatible with Istio < 1.1.5)
+
 rbac: true
+
 clusterRole: false            # Set to true to have OpenFaaS administrate multiple namespaces
+
 createCRDs: true
 
 # create pod security policies for OpenFaaS control plane
@@ -19,38 +27,8 @@ generateBasicAuth: false
 # image pull policy for openfaas components, can change to `IfNotPresent` in offline env
 openfaasImagePullPolicy: "Always"
 
-gatewayExternal:
-  annotations: {}
-
-gateway:
-  image: openfaas/gateway:0.20.2
-  readTimeout : "65s"
-  writeTimeout : "65s"
-  upstreamTimeout : "60s"  # Must be smaller than read/write_timeout
-  replicas: 1
-  scaleFromZero: true
-  # change the port when creating multiple releases in the same baremetal cluster
-  nodePort: 31112
-  maxIdleConns: 1024
-  maxIdleConnsPerHost: 1024
-  directFunctions: false
-  # Custom logs provider url. For example openfaas-loki would be
-  # "http://ofloki-openfaas-loki.openfaas:9191/"
-  logsProviderURL: ""
-  resources:
-    requests:
-      memory: "120Mi"
-      cpu: "50m"
-
-basicAuthPlugin:
-  image: openfaas/basic-auth-plugin:0.20.1
-  replicas: 1
-  resources:
-    requests:
-      memory: "50Mi"
-      cpu: "20m"
-
-oauth2Plugin:
+# openfaasPRO components, which requires openfaasPRO=true
+oidcAuthPlugin:
   enabled: false
   provider: "" # Leave blank, or put "azure"
   license: "example"
@@ -70,11 +48,54 @@ oauth2Plugin:
       memory: "120Mi"
       cpu: "50m"
   replicas: 1
-  image: openfaas/openfaas-oidc-plugin:0.3.7
+  image: openfaas/openfaas-oidc-plugin:0.3.8
   securityContext: true
 
+# Requires openfaasPRO=true
+# scale-to-zero feature
+faasIdler:
+  image: ghcr.io/openfaas/faas-idler-pro:0.4.2
+  replicas: 1
+  create: true
+  inactivityDuration: 30m               # If a function is inactive for 15 minutes, it may be scaled to zero
+  reconcileInterval: 2m                 # The interval between each attempt to scale functions to zero
+  readOnly: true                        # When set to true, no functions are scaled to zero
+  resources:
+    requests:
+      memory: "64Mi"
+
+## OSS components
+
+gateway:
+  image: ghcr.io/openfaas/gateway:0.20.12
+  readTimeout : "65s"
+  writeTimeout : "65s"
+  upstreamTimeout : "60s"  # Must be smaller than read/write_timeout
+  replicas: 1
+  scaleFromZero: true
+  # change the port when creating multiple releases in the same baremetal cluster
+  nodePort: 31112
+  maxIdleConns: 1024
+  maxIdleConnsPerHost: 1024
+  directFunctions: false
+  # Custom logs provider url. For example openfaas-loki would be
+  # "http://ofloki-openfaas-loki.openfaas:9191/"
+  logsProviderURL: ""
+  resources:
+    requests:
+      memory: "120Mi"
+      cpu: "50m"
+
+basicAuthPlugin:
+  image: ghcr.io/openfaas/basic-auth:0.20.12
+  replicas: 1
+  resources:
+    requests:
+      memory: "50Mi"
+      cpu: "20m"
+
 faasnetes:
-  image: ghcr.io/openfaas/faas-netes:0.12.12
+  image: ghcr.io/openfaas/faas-netes:0.13.4
   readTimeout : "60s"
   writeTimeout : "60s"
   imagePullPolicy : "Always"    # Image pull policy for deployed functions
@@ -95,7 +116,7 @@ faasnetes:
 
 # replaces faas-netes with openfaas-operator
 operator:
-  image: ghcr.io/openfaas/faas-netes:0.12.12
+  image: ghcr.io/openfaas/faas-netes:0.13.2
   create: false
   # set this to false when creating multiple releases in the same cluster
   # must be true for the first one only
@@ -106,7 +127,7 @@ operator:
       cpu: "50m"
 
 queueWorker:
-  image: openfaas/queue-worker:0.11.2
+  image: ghcr.io/openfaas/queue-worker:0.11.6
   # Control HA of queue-worker
   replicas: 1
   # Control the concurrent invocations
@@ -127,6 +148,7 @@ prometheus:
   resources:
     requests:
       memory: "512Mi"
+  annotations: {}
 
 alertmanager:
   image: prom/alertmanager:v0.18.0
@@ -149,8 +171,9 @@ nats:
   enableMonitoring: false
   maxPayload: "1Mb"
   metrics:
+    # Should stay off by default because the exporter is not multi-arch (yet)
     enabled: false
-    image: synadia/prometheus-nats-exporter:0.6.2 
+    image: synadia/prometheus-nats-exporter:0.6.2
   resources:
     requests:
       memory: "120Mi"
@@ -179,20 +202,7 @@ ingressOperator:
     requests:
       memory: "25Mi"
 
-# faas-idler configuration
-faasIdler:
-  image: openfaas/faas-idler:0.4.0
-  replicas: 1
-  create: true
-  inactivityDuration: 30m               # If a function is inactive for 15 minutes, it may be scaled to zero
-  reconcileInterval: 2m                 # The interval between each attempt to scale functions to zero
-  dryRun: true                          # Set to false to enable the idler to apply changes and scale to zero
-  resources:
-    requests:
-      memory: "64Mi"
-
-nodeSelector:
-  beta.kubernetes.io/arch: amd64
+nodeSelector: {}
 
 tolerations: []
 
@@ -202,3 +212,6 @@ kubernetesDNSDomain: cluster.local
 
 istio:
   mtls: false
+
+gatewayExternal:
+  annotations: {}

@@ -4,21 +4,21 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"strconv"
-	"time"
+
+	"github.com/openfaas/faas-netes/pkg/config"
 
 	clientset "github.com/openfaas/faas-netes/pkg/client/clientset/versioned"
 	"github.com/openfaas/faas-netes/pkg/handlers"
 	"github.com/openfaas/faas-netes/pkg/k8s"
 	faasnetesk8s "github.com/openfaas/faas-netes/pkg/k8s"
 	bootstrap "github.com/openfaas/faas-provider"
+	v1apps "k8s.io/client-go/listers/apps/v1"
 
 	"github.com/openfaas/faas-provider/logs"
 	"github.com/openfaas/faas-provider/proxy"
 	"github.com/openfaas/faas-provider/types"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	appsinformer "k8s.io/client-go/informers/apps/v1"
 	coreinformer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	glog "k8s.io/klog"
@@ -34,36 +34,13 @@ const defaultWriteTimeout = 8
 func New(client clientset.Interface,
 	kube kubernetes.Interface,
 	endpointsInformer coreinformer.EndpointsInformer,
-	deploymentsInformer appsinformer.DeploymentInformer,
-	clusterRole bool) *Server {
+	deploymentLister v1apps.DeploymentLister,
+	clusterRole bool,
+	cfg config.BootstrapConfig) *Server {
 
 	functionNamespace := "openfaas-fn"
 	if namespace, exists := os.LookupEnv("function_namespace"); exists {
 		functionNamespace = namespace
-	}
-
-	port := defaultHTTPPort
-	if portVal, exists := os.LookupEnv("port"); exists {
-		parsedVal, parseErr := strconv.Atoi(portVal)
-		if parseErr == nil && parsedVal > 0 {
-			port = parsedVal
-		}
-	}
-
-	readTimeout := defaultReadTimeout
-	if val, exists := os.LookupEnv("read_timeout"); exists {
-		parsedVal, parseErr := strconv.Atoi(val)
-		if parseErr == nil && parsedVal > 0 {
-			readTimeout = parsedVal
-		}
-	}
-
-	writeTimeout := defaultWriteTimeout
-	if val, exists := os.LookupEnv("write_timeout"); exists {
-		parsedVal, parseErr := strconv.Atoi(val)
-		if parseErr == nil && parsedVal > 0 {
-			writeTimeout = parsedVal
-		}
 	}
 
 	pprof := "false"
@@ -74,11 +51,10 @@ func New(client clientset.Interface,
 	lister := endpointsInformer.Lister()
 	functionLookup := k8s.NewFunctionLookup(functionNamespace, lister)
 
-	deploymentLister := deploymentsInformer.Lister()
 	bootstrapConfig := types.FaaSConfig{
-		ReadTimeout:  time.Duration(readTimeout) * time.Second,
-		WriteTimeout: time.Duration(writeTimeout) * time.Second,
-		TCPPort:      &port,
+		ReadTimeout:  cfg.FaaSConfig.ReadTimeout,
+		WriteTimeout: cfg.FaaSConfig.WriteTimeout,
+		TCPPort:      cfg.FaaSConfig.TCPPort,
 		EnableHealth: true,
 	}
 

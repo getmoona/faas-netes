@@ -15,8 +15,7 @@ spec:
   template:
     metadata:
       annotations:
-        sidecar.istio.io/inject: "false"
-        prometheus.io.scrape: "false" 
+        prometheus.io/scrape: "false"
       labels:
         app: nats
     spec:
@@ -36,5 +35,3 @@ spec:
           - memory
           - --cluster_id
           - faas-cluster
-      nodeSelector:
-        beta.kubernetes.io/arch: amd64
