@@ -14,22 +14,19 @@ The [Kafka connector](https://github.com/openfaas-incubator/kafka-connector) bri
 
 - Install OpenFaaS
 
-  You must have a working OpenFaaS installation. You can find [instructions in the docs](https://docs.openfaas.com/deployment/kubernetes/#pick-helm-or-yaml-files-for-deployment-a-or-b), including instructions to also install OpenFaaS via Helm.
+  You must have a working OpenFaaS installed.
 
-- Install Kafka (dev/testing)
+- Self-hosted Kafka with Helm
 
-  You can install [Apache Kafka](https://kafka.apache.org/) with the [wurstmeister Docker images](https://github.com/wurstmeister/kafka-docker) which will allow you to test the connector with a version of Kafka that is easy to set up, and suitable for development.
+  For development and testing, you can install [Apache Kafka](https://kafka.apache.org/) using Confluent's [chart](https://github.com/confluentinc/cp-helm-charts). Find out additional options here: [available here](https://github.com/helm/charts/tree/master/incubator/kafka#installing-the-chart)
 
-  ```sh
-  $ git clone https://github.com/openfaas/faas-netes
-  $ cd contrib/kafka-testing/
-  $ kubectl apply -f \
-   kafka-broker-dep.yml,kafka-broker-svc.yml,zookeeper-dep.yaml,zookeeper-svc.yaml
-  ```
+- Hosted Kafka
 
-- Install Kafka (production)
+  [Aiven](https://aiven.io/) and [Confluent Cloud](https://confluent.cloud/) have both been tested with the Kafka Connector.
 
-  You may already have a working Kafka installation, but if not you can provision it using a production-grade helm chart. Confluent has provided various [Helm charts here](https://github.com/confluentinc/cp-helm-charts). Instructions for installing Apache Kafka via Helm are [available here](https://github.com/helm/charts/tree/master/incubator/kafka#installing-the-chart).
+## Complete walk-through guide
+
+  You can continue with this guide, or start the [walk-through](quickstart.md) for testing purposes.
 
 ## Install the Chart
 
@@ -54,12 +51,22 @@ $ helm upgrade kafka-connector openfaas/kafka-connector \
 > The above command will also update your helm repo to pull in any new releases.
 
 ## Install a development version
-
 ```sh
 $ helm upgrade kafka-connector ./chart/kafka-connector \
     --install \
     --namespace openfaas
 ```
+
+## Encryption options
+
+1) TLS off (default)
+2) TLS on
+
+## Authentication options
+
+1) TLS with SASL using CA from the default trust store
+3) TLS with SASL using a custom CA
+4) TLS with client certificates
 
 ## Configuration
 
@@ -69,16 +76,22 @@ Additional kafka-connector options in `values.yaml`.
 | ------------------------ | -------------------------------------------------------------------------------------- | ------------------------------ |
 | `topics`                 | Topics to which the connector will bind, provide as a comma-separated list.            | `faas-request`                 |
 | `brokerHost`             | location of the Kafka brokers.                                                         | `kafka`                        |
-| `asyncInvocation`        | For long running or slow functions, offload to asychronous function invocations and carry on processing the stream |
-| `upstreamTimeout`       | Maximum timeout for upstream function call, must be a Go formatted duration string.    | `30s`                          |
+| `asyncInvocation`        | For long running or slow functions, offload to asychronous function invocations and carry on processing the stream | `false`   |
+| `upstreamTimeout`        | Maximum timeout for upstream function call, must be a Go formatted duration string.    | `30s`                          |
 | `rebuildInterval`        | Interval for rebuilding function to topic map, must be a Go formatted duration string. | `3s`                           |
 | `gatewayURL`             | The URL for the API gateway.                                                           | `http://gateway.openfaas:8080` |
 | `printResponse`          | Output the response of calling a function in the logs.                                 | `true`                         |
-| `printResponseBody`      | Output to the logs the response body when calling a function.                                 | `false`                         |
+| `printResponseBody`      | Output to the logs the response body when calling a function.                          | `false`                        |
 | `fullnameOverride`       | Override the name value used for the Connector Deployment object.                      | ``                             |
+| `sasl`                   | Enable auth with a SASL username/password                                              | `false`                        |
+| `brokerPasswordSecret`   | Name of secret for SASL password                                                       | `kafka-broker-password`        |
+| `brokerUsernameSecret`   | Name of secret for SASL username                                                       | `kafka-broker-username`        |
+| `caSecret`               | Name secret for TLS CA - leave empty to disable                                        | `kafka-broker-ca`              |
+| `certSecret`             | Name secret for TLS client certificate cert - leave empty to disable                   | `kafka-broker-cert`            |
+| `keySecret`              | Name secret for TLS client certificate private key - leave empty to disable            | `kafka-broker-key`             |
+| `contentType`            | Set a HTTP Content Type during function invocation.                                    | `""`                           |
 
-Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`.
-See values.yaml for detailed configuration.
+Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. See `values.yaml` for the default configuration.
 
 ## Removing the kafka-connector
 
